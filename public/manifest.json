@@ -1,0 +1,17 @@
+{
+  "name": "라오어 무한매수법 비서",
+  "short_name": "무한매수",
+  "description": "라오어의 무한매수법 투자를 도와주는 가이드 앱",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

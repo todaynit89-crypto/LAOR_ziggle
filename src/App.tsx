@@ -48,6 +48,31 @@ export default function App() {
   const [calcSeed, setCalcSeed] = useState<string>('');
   const [calcResult, setCalcResult] = useState<{ total: number; daily: number; totalKRW: number; dailyKRW: number } | null>(null);
 
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    }
+  };
+
   useEffect(() => {
 
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -469,6 +494,15 @@ export default function App() {
     <div className="relative z-10 max-w-[420px] mx-auto px-4 pt-4 pb-10 font-sans">
       {/* Header */}
       <div className="text-center py-5 pb-6 relative">
+        {deferredPrompt && (
+          <button
+            onClick={handleInstallClick}
+            className="absolute left-0 top-5 hover:text-cyan-700 transition-colors px-3 py-1.5 rounded-full hover:bg-cyan-50 text-[#22d3ee] bg-[rgba(34,211,238,0.1)] text-sm font-bold flex items-center gap-1"
+            title="앱 설치"
+          >
+            <Download size={16} /> 앱 설치
+          </button>
+        )}
         <button 
           onClick={() => setShowHistory(true)}
           className="absolute right-10 top-5 hover:text-cyan-700 transition-colors p-2 rounded-full hover:bg-cyan-50 text-[#22d3ee] bg-[rgba(34,211,238,0.1)]"

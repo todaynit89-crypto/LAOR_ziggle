@@ -1,0 +1,36 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans KR", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  background-color: #f8fafc;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+.dark body {
+  background-color: #0a0e1a;
+  color: #e8edf5;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+      radial-gradient(circle at 20% 20%, rgba(59,130,246,0.08) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(6,182,212,0.06) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dark body::before {
+  background-image:
+      radial-gradient(circle at 20% 20%, rgba(59,130,246,0.04) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(34,211,238,0.03) 0%, transparent 50%);
+}

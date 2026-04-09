@@ -1,4 +1,4 @@
-const CACHE_NAME = 'laor-infinite-cache-v1';
+const CACHE_NAME = 'laor-infinite-cache-v2';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -7,6 +7,7 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting(); // Force the waiting service worker to become the active service worker.
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
@@ -21,6 +22,14 @@ self.addEventListener('fetch', (event) => {
       .then((response) => {
         // Cache hit - return response
         if (response) {
+          // Fetch the latest version in the background to keep cache fresh
+          fetch(event.request).then((res) => {
+            if(res && res.status === 200 && res.type === 'basic') {
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(event.request, res);
+              });
+            }
+          }).catch(() => {});
           return response;
         }
         return fetch(event.request).then(
@@ -49,6 +58,7 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  event.waitUntil(clients.claim()); // Claim clients immediately
   const cacheWhitelist = [CACHE_NAME];
   event.waitUntil(
     caches.keys().then((cacheNames) => {

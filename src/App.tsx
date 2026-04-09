@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { History, Trash2, X, ChevronRight, Plus, BarChart2, List, Settings, Download, Upload, Copy, Check, Share2 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 
 const STORAGE_KEY = 'laor_infinite_data';
 const HISTORY_KEY = 'laor_infinite_history';
@@ -14,6 +14,7 @@ interface HistoryEntry {
   round: number;
   avgPrice: number;
   marketPrice: number;
+  memo?: string;
   results: any;
 }
 
@@ -28,6 +29,7 @@ export default function App() {
   const [round, setRound] = useState<string>('');
   const [avgPrice, setAvgPrice] = useState<string>('');
   const [marketPrice, setMarketPrice] = useState<string>('');
+  const [memo, setMemo] = useState<string>('');
 
   const [errors, setErrors] = useState<{ [key: string]: boolean }>({});
   const [results, setResults] = useState<any>(null);
@@ -42,11 +44,19 @@ export default function App() {
   const [copiedStates, setCopiedStates] = useState<{ [key: string]: boolean }>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [activeTab, setActiveTab] = useState<'calculator' | 'dashboard' | 'soul'>('calculator');
+
   const [showSimulation, setShowSimulation] = useState(false);
   const [showBudgetCalc, setShowBudgetCalc] = useState(false);
   const [calcPrice, setCalcPrice] = useState<string>('');
   const [calcSeed, setCalcSeed] = useState<string>('');
   const [calcResult, setCalcResult] = useState<{ total: number; daily: number; totalKRW: number; dailyKRW: number } | null>(null);
+
+  const [soulCurrentAvg, setSoulCurrentAvg] = useState('');
+  const [soulCurrentShares, setSoulCurrentShares] = useState('');
+  const [soulTargetAvg, setSoulTargetAvg] = useState('');
+  const [soulMarketPrice, setSoulMarketPrice] = useState('');
+  const [soulResult, setSoulResult] = useState<{ additionalShares: number; additionalBudget: number } | null>(null);
 
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -160,20 +170,149 @@ export default function App() {
     showToast('✅ 데이터가 백업되었습니다');
   };
 
+  const exportCSV = () => {
+    if (history.length === 0) {
+      showToast('⚠ 내보낼 기록이 없습니다');
+      return;
+    }
+    
+    // CSV Header
+    const headers = ['종목', '날짜', '회차', '총시드(USD)', '평단가(USD)', '시장가(USD)', '매도목표가(USD)', '평단매수(USD)', '평단매수(주)', '큰수매수(USD)', '큰수매수(주)', '일일예산(USD)', '남은예산(USD)', '메모'];
+    
+    // CSV Rows
+    const rows = history.map(entry => {
+      const res = entry.results || {};
+      return [
+        entry.ticker || 'TQQQ',
+        entry.date,
+        entry.round,
+        entry.seed,
+        entry.avgPrice,
+        entry.marketPrice,
+        res.sellPrice ? res.sellPrice.toFixed(2) : '',
+        res.locAvgPrice ? res.locAvgPrice.toFixed(2) : '',
+        res.locAvgShares || 0,
+        res.locHighPrice ? res.locHighPrice.toFixed(2) : '',
+        res.locHighShares || 0,
+        res.dailyBudget ? res.dailyBudget.toFixed(2) : '',
+        res.remaining ? res.remaining.toFixed(2) : '',
+        entry.memo || ''
+      ].map(val => `"${val}"`).join(',');
+    });
+    
+    // Combine and add BOM for Excel UTF-8 support
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `laor_history_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('✅ 엑셀(CSV) 파일로 내보냈습니다');
+  };
+
   const importData = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
-      try {
-        const data = JSON.parse(event.target?.result as string);
-        if (data.storage) localStorage.setItem(STORAGE_KEY, data.storage);
-        if (data.history) localStorage.setItem(HISTORY_KEY, data.history);
-        if (data.theme) localStorage.setItem('laor_theme', data.theme);
-        showToast('✅ 데이터가 복원되었습니다. 새로고침합니다.');
-        setTimeout(() => window.location.reload(), 1500);
-      } catch (err) {
-        showToast('❌ 잘못된 백업 파일입니다');
+      const text = event.target?.result as string;
+      
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        try {
+          const lines = text.replace(/^\uFEFF/, '').split('\n').filter(line => line.trim() !== '');
+          if (lines.length <= 1) {
+            showToast('⚠ 데이터가 없는 CSV 파일입니다');
+            return;
+          }
+          
+          const historyEntries: HistoryEntry[] = [];
+          const uniqueTickers = new Set<string>();
+          
+          const parseCSVRow = (line: string) => {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+              const char = line[i];
+              if (char === '"') {
+                inQuotes = !inQuotes;
+              } else if (char === ',' && !inQuotes) {
+                result.push(current);
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            result.push(current);
+            return result;
+          };
+
+          for (let i = 1; i < lines.length; i++) {
+            const row = parseCSVRow(lines[i]);
+            if (row.length >= 13) {
+              const ticker = row[0] || 'TQQQ';
+              uniqueTickers.add(ticker);
+              historyEntries.push({
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                ticker: ticker,
+                date: row[1],
+                round: parseInt(row[2]) || 1,
+                seed: parseFloat(row[3]) || 0,
+                avgPrice: parseFloat(row[4]) || 0,
+                marketPrice: parseFloat(row[5]) || 0,
+                memo: row[13] || '',
+                results: {
+                  sellPrice: parseFloat(row[6]) || 0,
+                  locAvgPrice: parseFloat(row[7]) || 0,
+                  locAvgShares: parseInt(row[8]) || 0,
+                  locHighPrice: parseFloat(row[9]) || 0,
+                  locHighShares: parseInt(row[10]) || 0,
+                  dailyBudget: parseFloat(row[11]) || 0,
+                  remaining: parseFloat(row[12]) || 0
+                }
+              });
+            }
+          }
+          
+          if (historyEntries.length > 0) {
+            // Merge with existing history or replace? Let's replace for consistency with JSON import
+            localStorage.setItem(HISTORY_KEY, JSON.stringify(historyEntries));
+            
+            // Update tickers if needed
+            const rawStorage = localStorage.getItem(STORAGE_KEY);
+            let storageData = rawStorage ? JSON.parse(rawStorage) : { tickers: ['TQQQ'], activeTicker: 'TQQQ', tickerData: {} };
+            
+            uniqueTickers.forEach(t => {
+              if (!storageData.tickers.includes(t)) {
+                storageData.tickers.push(t);
+                storageData.tickerData[t] = { seed: '', round: '', avgPrice: '', marketPrice: '' };
+              }
+            });
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(storageData));
+
+            showToast('✅ CSV 기록이 복원되었습니다. 새로고침합니다.');
+            setTimeout(() => window.location.reload(), 1500);
+          } else {
+            showToast('❌ 올바른 형식의 CSV 파일이 아닙니다');
+          }
+        } catch (err) {
+          showToast('❌ CSV 파일을 파싱하는 중 오류가 발생했습니다');
+        }
+      } else {
+        // JSON Import
+        try {
+          const data = JSON.parse(text);
+          if (data.storage) localStorage.setItem(STORAGE_KEY, data.storage);
+          if (data.history) localStorage.setItem(HISTORY_KEY, data.history);
+          if (data.theme) localStorage.setItem('laor_theme', data.theme);
+          showToast('✅ 데이터가 복원되었습니다. 새로고침합니다.');
+          setTimeout(() => window.location.reload(), 1500);
+        } catch (err) {
+          showToast('❌ 잘못된 백업 파일입니다');
+        }
       }
     };
     reader.readAsText(file);
@@ -292,6 +431,203 @@ export default function App() {
     setTimeout(() => {
       document.getElementById('resultArea')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 100);
+  };
+
+  const calculateSoul = () => {
+    const A = parseFloat(soulCurrentAvg);
+    const S = parseFloat(soulCurrentShares);
+    const T = parseFloat(soulTargetAvg);
+    const M = parseFloat(soulMarketPrice);
+
+    if (!A || !S || !T || !M) {
+      showToast('⚠ 모든 값을 입력해주세요');
+      return;
+    }
+    if (T <= M) {
+      showToast('⚠ 목표 평단가는 현재가보다 높아야 합니다');
+      return;
+    }
+    if (A <= T) {
+      showToast('⚠ 이미 목표 평단가보다 낮거나 같습니다');
+      return;
+    }
+
+    const X = (S * (A - T)) / (T - M);
+    const additionalShares = Math.ceil(X);
+    const additionalBudget = additionalShares * M;
+
+    setSoulResult({ additionalShares, additionalBudget });
+  };
+
+  const renderDashboard = () => {
+    let totalSeed = 0;
+    let totalInvested = 0;
+    const chartData: any[] = [];
+
+    tickers.forEach(t => {
+      const data = tickerData[t] || {};
+      const s = parseFloat(data.seed) || 0;
+      const r = parseInt(data.round) || 0;
+      const invested = (s / 40) * r;
+      
+      totalSeed += s;
+      totalInvested += invested;
+
+      if (invested > 0) {
+        chartData.push({ name: t, value: invested });
+      }
+    });
+
+    const remaining = totalSeed - totalInvested;
+    if (remaining > 0) {
+      chartData.push({ name: '현금(예수금)', value: remaining });
+    }
+
+    const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'];
+
+    return (
+      <div className="border rounded-[14px] p-5 mb-3.5 transition-colors bg-[#111827] border-[#1e2d4a]">
+        <h2 className="font-bold tracking-[1px] uppercase flex items-center gap-1.5 text-[#5a6a85] mb-4">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] inline-block"></span>
+          포트폴리오 대시보드
+        </h2>
+        
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <div className="bg-[#1a2236] border border-[#1e2d4a] rounded-xl p-4">
+            <div className="text-[#8896b0] text-sm mb-1">총 시드</div>
+            <div className="font-mono font-bold text-xl text-[#e8edf5]">${totalSeed.toLocaleString(undefined, {maximumFractionDigits:2})}</div>
+          </div>
+          <div className="bg-[#1a2236] border border-[#1e2d4a] rounded-xl p-4">
+            <div className="text-[#8896b0] text-sm mb-1">투입 금액 (추정)</div>
+            <div className="font-mono font-bold text-xl text-[#3b82f6]">${totalInvested.toLocaleString(undefined, {maximumFractionDigits:2})}</div>
+          </div>
+        </div>
+
+        {totalSeed > 0 ? (
+          <div className="h-[250px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={chartData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                  stroke="none"
+                >
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.name === '현금(예수금)' ? '#334155' : COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip 
+                  formatter={(value: number) => `$${value.toLocaleString(undefined, {maximumFractionDigits:2})}`}
+                  contentStyle={{ backgroundColor: '#162032', borderColor: '#1e2d4a', borderRadius: '8px', color: '#e8edf5' }}
+                  itemStyle={{ color: '#e8edf5' }}
+                />
+                <Legend verticalAlign="bottom" height={36} wrapperStyle={{ color: '#8896b0' }}/>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="text-center py-10 text-[#5a6a85]">
+            입력된 시드가 없습니다. 계산기에서 시드를 설정해주세요.
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderSoulCalculator = () => {
+    return (
+      <div className="border rounded-[14px] p-5 mb-3.5 transition-colors bg-[#111827] border-[#1e2d4a]">
+        <h2 className="font-bold tracking-[1px] uppercase flex items-center gap-1.5 text-[#5a6a85] mb-4">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] inline-block"></span>
+          영혼법 (물타기) 계산기
+        </h2>
+        <p className="text-[#8896b0] text-sm mb-5 leading-relaxed">
+          40회차가 끝났는데도 목표 수익에 도달하지 못했을 때, <br/>
+          목표 평단가로 낮추기 위해 필요한 추가 매수량과 예산을 계산합니다.
+        </p>
+
+        <div className="space-y-3.5">
+          <div className="field">
+            <label className="block font-medium mb-1.5 text-[#8896b0]">현재 평균 매수 단가 ($)</label>
+            <input 
+              type="number" 
+              value={soulCurrentAvg}
+              onChange={e => setSoulCurrentAvg(e.target.value)}
+              placeholder="예: 50.25" 
+              className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[10px] px-3.5 py-3 text-[16px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+            />
+          </div>
+          <div className="field">
+            <label className="block font-medium mb-1.5 text-[#8896b0]">현재 보유 주식수 (주)</label>
+            <input 
+              type="number" 
+              value={soulCurrentShares}
+              onChange={e => setSoulCurrentShares(e.target.value)}
+              placeholder="예: 150" 
+              className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[10px] px-3.5 py-3 text-[16px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+            />
+          </div>
+          <div className="field">
+            <label className="block font-medium mb-1.5 text-[#8896b0]">원하는 목표 평단가 ($)</label>
+            <input 
+              type="number" 
+              value={soulTargetAvg}
+              onChange={e => setSoulTargetAvg(e.target.value)}
+              placeholder="예: 45.00" 
+              className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[10px] px-3.5 py-3 text-[16px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+            />
+          </div>
+          <div className="field">
+            <label className="block font-medium mb-1.5 text-[#8896b0]">현재 주가 ($)</label>
+            <input 
+              type="number" 
+              value={soulMarketPrice}
+              onChange={e => setSoulMarketPrice(e.target.value)}
+              placeholder="예: 40.00" 
+              className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[10px] px-3.5 py-3 text-[16px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+            />
+          </div>
+
+          <button 
+            onClick={calculateSoul}
+            className="w-full mt-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white font-bold py-3.5 rounded-[10px] transition-colors shadow-[0_4px_14px_rgba(59,130,246,0.3)]"
+          >
+            계산하기
+          </button>
+        </div>
+
+        {soulResult && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-5 p-4 rounded-xl border bg-[rgba(59,130,246,0.05)] border-[rgba(59,130,246,0.1)]"
+          >
+            <div className="text-center mb-4">
+              <div className="text-[#8896b0] mb-1">목표 달성을 위해 필요한 추가 매수</div>
+              <div className="text-2xl font-black text-[#60a5fa] font-mono">
+                {soulResult.additionalShares.toLocaleString()}주
+              </div>
+            </div>
+            <div className="flex justify-between items-center pt-3 border-t border-[rgba(59,130,246,0.1)]">
+              <span className="text-[#8896b0]">필요한 추가 예산</span>
+              <div className="text-right">
+                <div className="font-bold font-mono text-[#e8edf5]">
+                  ${soulResult.additionalBudget.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-sm text-[#5a6a85]">
+                  약 {(soulResult.additionalBudget * 1500).toLocaleString(undefined, { maximumFractionDigits: 0 })}원
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </div>
+    );
   };
 
   const saveData = () => {
@@ -419,12 +755,14 @@ export default function App() {
       round: parseInt(round),
       avgPrice: parseFloat(avgPrice),
       marketPrice: parseFloat(marketPrice),
+      memo: memo,
       results: results
     };
     const newHistory = [newEntry, ...history];
     setHistory(newHistory);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(newHistory));
     showToast('✅ 기록에 추가되었습니다');
+    setMemo('');
   };
 
   const deleteHistoryEntry = (id: string) => {
@@ -600,8 +938,35 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Ticker Tabs */}
-      <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
+      {/* Main Navigation Tabs */}
+      <div className="flex gap-2 mb-4 bg-[#1a2236] p-1.5 rounded-[12px] border border-[#1e2d4a]">
+        <button 
+          onClick={() => setActiveTab('calculator')}
+          className={`flex-1 py-2 rounded-[8px] font-bold text-[14px] transition-all ${activeTab === 'calculator' ? 'bg-[#3b82f6] text-white shadow-md' : 'text-[#8896b0] hover:text-[#e8edf5]'}`}
+        >
+          계산기
+        </button>
+        <button 
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex-1 py-2 rounded-[8px] font-bold text-[14px] transition-all ${activeTab === 'dashboard' ? 'bg-[#3b82f6] text-white shadow-md' : 'text-[#8896b0] hover:text-[#e8edf5]'}`}
+        >
+          대시보드
+        </button>
+        <button 
+          onClick={() => setActiveTab('soul')}
+          className={`flex-1 py-2 rounded-[8px] font-bold text-[14px] transition-all ${activeTab === 'soul' ? 'bg-[#3b82f6] text-white shadow-md' : 'text-[#8896b0] hover:text-[#e8edf5]'}`}
+        >
+          영혼법
+        </button>
+      </div>
+
+      {activeTab === 'dashboard' && renderDashboard()}
+      {activeTab === 'soul' && renderSoulCalculator()}
+
+      {activeTab === 'calculator' && (
+        <>
+          {/* Ticker Tabs */}
+          <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
         {tickers.map(ticker => (
           <div 
             key={ticker}
@@ -961,6 +1326,18 @@ export default function App() {
                 </div>
               )}
 
+              {/* Memo Input */}
+              <div className="mb-4">
+                <label className="block font-medium mb-1.5 text-[#8896b0]">매매 일지 (메모)</label>
+                <input
+                  type="text"
+                  value={memo}
+                  onChange={e => setMemo(e.target.value)}
+                  placeholder="오늘의 시장 상황이나 다짐을 기록해보세요"
+                  className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[10px] px-3.5 py-3 text-[14px] text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85]"
+                />
+              </div>
+
               <div className="mt-5 flex gap-2">
                 <button 
                   onClick={addToHistory}
@@ -981,6 +1358,8 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+      </>
+      )}
 
       {/* Settings Modal */}
       <AnimatePresence>
@@ -1016,12 +1395,20 @@ export default function App() {
                   <p className="mb-3 leading-relaxed text-[#5a6a85]">
                     현재 저장된 모든 종목 설정과 기록을 파일로 다운로드합니다. 기기를 변경하거나 브라우저 캐시를 삭제하기 전에 반드시 백업하세요.
                   </p>
-                  <button 
-                    onClick={exportData}
-                    className="w-full py-2.5 rounded-lg font-bold transition-colors bg-[#e8edf5] text-[#0f172a] hover:bg-white"
-                  >
-                    백업 파일 다운로드
-                  </button>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={exportData}
+                      className="flex-1 py-2.5 rounded-lg font-bold transition-colors bg-[#e8edf5] text-[#0f172a] hover:bg-white text-sm"
+                    >
+                      전체 백업 (JSON)
+                    </button>
+                    <button 
+                      onClick={exportCSV}
+                      className="flex-1 py-2.5 rounded-lg font-bold transition-colors bg-[#10b981] text-white hover:bg-[#059669] text-sm"
+                    >
+                      엑셀 내보내기 (CSV)
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-4 rounded-xl border bg-[#162032] border-[#1e2d4a]">
@@ -1029,11 +1416,12 @@ export default function App() {
                     <Upload size={16} /> 데이터 복원
                   </h4>
                   <p className="mb-3 leading-relaxed text-[#5a6a85]">
-                    백업해둔 파일을 불러와 데이터를 복구합니다. <span className="text-red-500">주의: 현재 기기의 데이터는 덮어쓰기 됩니다.</span>
+                    백업해둔 <span className="text-[#e8edf5] font-bold">JSON 또는 CSV 파일</span>을 불러와 데이터를 복구합니다. <br/>
+                    <span className="text-red-500">주의: 현재 기기의 데이터는 덮어쓰기 됩니다.</span>
                   </p>
                   <input 
                     type="file" 
-                    accept=".json" 
+                    accept=".json,application/json,.csv,text/csv" 
                     className="hidden" 
                     ref={fileInputRef}
                     onChange={importData}
@@ -1042,76 +1430,7 @@ export default function App() {
                     onClick={() => fileInputRef.current?.click()}
                     className="w-full py-2.5 border rounded-lg font-bold transition-colors bg-[#1a2236] border-[#1e2d4a] text-[#e8edf5] hover:bg-[#1e2d4a]"
                   >
-                    백업 파일 불러오기
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Settings Modal */}
-      <AnimatePresence>
-        {showSettings && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 backdrop-blur-sm z-50 flex items-center justify-center p-4 bg-black/60"
-            onClick={() => setShowSettings(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 10 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 10 }}
-              className="rounded-[20px] w-full max-w-[360px] shadow-2xl overflow-hidden border bg-[#0f172a] border-[#1e2d4a]"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="flex justify-between items-center p-4 border-[#1e2d4a]">
-                <h3 className="font-bold flex items-center gap-2 text-[#e8edf5]">
-                  <Settings size={18} /> 설정 및 데이터 관리
-                </h3>
-                <button onClick={() => setShowSettings(false)} className="text-slate-500 p-1 hover:text-[#e8edf5]">
-                  <X size={20} />
-                </button>
-              </div>
-              
-              <div className="p-5 space-y-4">
-                <div className="p-4 rounded-xl border bg-[#162032] border-[#1e2d4a]">
-                  <h4 className="font-bold mb-2 flex items-center gap-1.5 text-[#8896b0]">
-                    <Download size={16} /> 데이터 백업
-                  </h4>
-                  <p className="mb-3 leading-relaxed text-[#5a6a85]">
-                    현재 저장된 모든 종목 설정과 기록을 파일로 다운로드합니다. 기기를 변경하거나 브라우저 캐시를 삭제하기 전에 반드시 백업하세요.
-                  </p>
-                  <button 
-                    onClick={exportData}
-                    className="w-full py-2.5 rounded-lg font-bold transition-colors bg-[#e8edf5] text-[#0f172a] hover:bg-white"
-                  >
-                    백업 파일 다운로드
-                  </button>
-                </div>
-
-                <div className="p-4 rounded-xl border bg-[#162032] border-[#1e2d4a]">
-                  <h4 className="font-bold mb-2 flex items-center gap-1.5 text-[#8896b0]">
-                    <Upload size={16} /> 데이터 복원
-                  </h4>
-                  <p className="mb-3 leading-relaxed text-[#5a6a85]">
-                    백업해둔 파일을 불러와 데이터를 복구합니다. <span className="text-red-500">주의: 현재 기기의 데이터는 덮어쓰기 됩니다.</span>
-                  </p>
-                  <input 
-                    type="file" 
-                    accept=".json" 
-                    className="hidden" 
-                    ref={fileInputRef}
-                    onChange={importData}
-                  />
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full py-2.5 border rounded-lg font-bold transition-colors bg-[#1a2236] border-[#1e2d4a] text-[#e8edf5] hover:bg-[#1e2d4a]"
-                  >
-                    백업 파일 불러오기
+                    백업 파일(JSON/CSV) 불러오기
                   </button>
                 </div>
               </div>
@@ -1386,6 +1705,13 @@ export default function App() {
                                 <div className="font-bold text-[#e8edf5]">${entry.avgPrice.toFixed(2)}</div>
                               </div>
                             </div>
+                            
+                            {entry.memo && (
+                              <div className="mb-3 p-2.5 rounded-lg text-sm bg-[#0f172a] border border-[#1e2d4a] text-[#8896b0]">
+                                <span className="font-bold text-[#60a5fa] mr-1.5">메모:</span>
+                                {entry.memo}
+                              </div>
+                            )}
                             
                             <button 
                               onClick={() => loadHistoryEntry(entry)}

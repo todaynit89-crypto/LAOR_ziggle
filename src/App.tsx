@@ -155,6 +155,18 @@ export default function App() {
   };
 
   const exportData = () => {
+    // Auto-save current state before export
+    const newTickerData = {
+      ...tickerData,
+      [activeTicker]: { seed, round, avgPrice, marketPrice }
+    };
+    setTickerData(newTickerData);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      tickers,
+      activeTicker,
+      tickerData: newTickerData
+    }));
+
     const data = {
       storage: localStorage.getItem(STORAGE_KEY),
       history: localStorage.getItem(HISTORY_KEY),
@@ -465,13 +477,32 @@ export default function App() {
     setSoulResult({ additionalShares, additionalBudget });
   };
 
+  const handleTabChange = (tab: 'calculator' | 'dashboard' | 'soul') => {
+    const newTickerData = {
+      ...tickerData,
+      [activeTicker]: { seed, round, avgPrice, marketPrice }
+    };
+    setTickerData(newTickerData);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      tickers,
+      activeTicker,
+      tickerData: newTickerData
+    }));
+    setActiveTab(tab);
+  };
+
   const renderDashboard = () => {
     let totalSeed = 0;
     let totalInvested = 0;
     const chartData: any[] = [];
 
+    const currentTickerData = {
+      ...tickerData,
+      [activeTicker]: { seed, round, avgPrice, marketPrice }
+    };
+
     tickers.forEach(t => {
-      const data = tickerData[t] || {};
+      const data = currentTickerData[t] || {};
       const s = parseFloat(data.seed) || 0;
       const r = parseInt(data.round) || 0;
       const invested = (s / 40) * r;
@@ -838,15 +869,6 @@ export default function App() {
     <div className="relative z-10 max-w-[420px] mx-auto px-4 pt-4 pb-10 font-sans">
       {/* Header */}
       <div className="text-center py-5 pb-6 relative">
-        {deferredPrompt && (
-          <button
-            onClick={handleInstallClick}
-            className="absolute left-0 top-5 hover:text-cyan-700 transition-colors px-3 py-1.5 rounded-full hover:bg-cyan-50 text-[#22d3ee] bg-[rgba(34,211,238,0.1)] text-sm font-bold flex items-center gap-1"
-            title="앱 설치"
-          >
-            <Download size={16} /> 앱 설치
-          </button>
-        )}
         <button 
           onClick={() => setShowHistory(true)}
           className="absolute right-10 top-5 hover:text-cyan-700 transition-colors p-2 rounded-full hover:bg-cyan-50 text-[#22d3ee] bg-[rgba(34,211,238,0.1)]"
@@ -947,19 +969,19 @@ export default function App() {
       {/* Main Navigation Tabs */}
       <div className="flex gap-2 mb-4 bg-[#1a2236] p-1.5 rounded-[12px] border border-[#1e2d4a]">
         <button 
-          onClick={() => setActiveTab('calculator')}
+          onClick={() => handleTabChange('calculator')}
           className={`flex-1 py-2 rounded-[8px] font-bold text-[14px] transition-all ${activeTab === 'calculator' ? 'bg-[#3b82f6] text-white shadow-md' : 'text-[#8896b0] hover:text-[#e8edf5]'}`}
         >
           계산기
         </button>
         <button 
-          onClick={() => setActiveTab('dashboard')}
+          onClick={() => handleTabChange('dashboard')}
           className={`flex-1 py-2 rounded-[8px] font-bold text-[14px] transition-all ${activeTab === 'dashboard' ? 'bg-[#3b82f6] text-white shadow-md' : 'text-[#8896b0] hover:text-[#e8edf5]'}`}
         >
           대시보드
         </button>
         <button 
-          onClick={() => setActiveTab('soul')}
+          onClick={() => handleTabChange('soul')}
           className={`flex-1 py-2 rounded-[8px] font-bold text-[14px] transition-all ${activeTab === 'soul' ? 'bg-[#3b82f6] text-white shadow-md' : 'text-[#8896b0] hover:text-[#e8edf5]'}`}
         >
           영혼법

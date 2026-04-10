@@ -121,7 +121,6 @@ export default function App() {
     }
   }, []);
 
-
   const showToast = (msg: string, duration = 2200) => {
     setToast({ msg, show: true });
     setTimeout(() => setToast({ msg, show: false }), duration);
@@ -248,6 +247,7 @@ export default function App() {
           
           const historyEntries: HistoryEntry[] = [];
           const uniqueTickers = new Set<string>();
+          const latestTickerData: Record<string, any> = {};
           
           const parseCSVRow = (line: string) => {
             const result = [];
@@ -273,14 +273,28 @@ export default function App() {
             if (row.length >= 13) {
               const ticker = row[0] || 'TQQQ';
               uniqueTickers.add(ticker);
+              
+              const round = parseInt(row[2]) || 1;
+              const seed = parseFloat(row[3]) || 0;
+              const avgPrice = parseFloat(row[4]) || 0;
+              const marketPrice = parseFloat(row[5]) || 0;
+              
+              // Keep updating with the latest row we see for each ticker
+              latestTickerData[ticker] = {
+                seed: seed ? seed.toString() : '',
+                round: round ? round.toString() : '',
+                avgPrice: avgPrice ? avgPrice.toString() : '',
+                marketPrice: marketPrice ? marketPrice.toString() : ''
+              };
+              
               historyEntries.push({
                 id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
                 ticker: ticker,
                 date: row[1],
-                round: parseInt(row[2]) || 1,
-                seed: parseFloat(row[3]) || 0,
-                avgPrice: parseFloat(row[4]) || 0,
-                marketPrice: parseFloat(row[5]) || 0,
+                round: round,
+                seed: seed,
+                avgPrice: avgPrice,
+                marketPrice: marketPrice,
                 memo: row[13] || '',
                 results: {
                   sellPrice: parseFloat(row[6]) || 0,
@@ -306,6 +320,15 @@ export default function App() {
             uniqueTickers.forEach(t => {
               if (!storageData.tickers.includes(t)) {
                 storageData.tickers.push(t);
+              }
+              
+              const existingData = storageData.tickerData[t];
+              const isEmpty = !existingData || (!existingData.seed && !existingData.round && !existingData.avgPrice && !existingData.marketPrice);
+              
+              // Restore the latest input values from the CSV ONLY IF the current inputs are empty
+              if (isEmpty && latestTickerData[t]) {
+                storageData.tickerData[t] = latestTickerData[t];
+              } else if (!existingData) {
                 storageData.tickerData[t] = { seed: '', round: '', avgPrice: '', marketPrice: '' };
               }
             });

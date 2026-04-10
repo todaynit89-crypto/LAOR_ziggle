@@ -44,7 +44,7 @@ export default function App() {
   const [copiedStates, setCopiedStates] = useState<{ [key: string]: boolean }>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [activeTab, setActiveTab] = useState<'calculator' | 'dashboard' | 'soul'>('calculator');
+  const [activeTab, setActiveTab] = useState<'calculator' | 'dashboard' | 'soul' | 'tools'>('calculator');
 
   const [showSimulation, setShowSimulation] = useState(false);
   const [showBudgetCalc, setShowBudgetCalc] = useState(false);
@@ -57,6 +57,22 @@ export default function App() {
   const [soulTargetAvg, setSoulTargetAvg] = useState('');
   const [soulMarketPrice, setSoulMarketPrice] = useState('');
   const [soulResult, setSoulResult] = useState<{ additionalShares: number; additionalBudget: number } | null>(null);
+
+  // Tools: Average Down Calculator
+  const [toolAvgCurrentPrice, setToolAvgCurrentPrice] = useState('');
+  const [toolAvgCurrentShares, setToolAvgCurrentShares] = useState('');
+  const [toolAvgAddPrice, setToolAvgAddPrice] = useState('');
+  const [toolAvgAddShares, setToolAvgAddShares] = useState('');
+
+  // Tools: Target Profit Calculator
+  const [toolTargetMode, setToolTargetMode] = useState<'percent' | 'amount'>('percent');
+  const [toolTargetAvgPrice, setToolTargetAvgPrice] = useState('');
+  const [toolTargetShares, setToolTargetShares] = useState('');
+  const [toolTargetPercent, setToolTargetPercent] = useState('');
+  const [toolTargetAmount, setToolTargetAmount] = useState('');
+  const [toolTargetFee, setToolTargetFee] = useState('0.07'); // Default fee
+  const [toolTargetTax, setToolTargetTax] = useState('22'); // Default tax
+  const [toolExchangeRate, setToolExchangeRate] = useState('1400'); // Default KRW exchange rate
 
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -690,6 +706,293 @@ export default function App() {
     );
   };
 
+  const renderTools = () => {
+    const calcAvgDown = () => {
+      const currentPrice = parseFloat(toolAvgCurrentPrice) || 0;
+      const currentShares = parseFloat(toolAvgCurrentShares) || 0;
+      const addPrice = parseFloat(toolAvgAddPrice) || 0;
+      const addShares = parseFloat(toolAvgAddShares) || 0;
+
+      if (!currentPrice || !currentShares || !addPrice || !addShares) return null;
+
+      const totalShares = currentShares + addShares;
+      const totalInvested = (currentPrice * currentShares) + (addPrice * addShares);
+      const newAvgPrice = totalInvested / totalShares;
+
+      return {
+        newAvgPrice,
+        totalShares,
+        totalInvested,
+        addAmount: addPrice * addShares
+      };
+    };
+
+    const calcTargetProfit = () => {
+      const B = parseFloat(toolTargetAvgPrice) || 0;
+      const S = parseFloat(toolTargetShares) || 0;
+      const F = (parseFloat(toolTargetFee) || 0) / 100;
+      const T = (parseFloat(toolTargetTax) || 0) / 100;
+      const exRate = parseFloat(toolExchangeRate) || 1400;
+
+      if (!B || !S) return null;
+
+      let P = 0; // Target Sell Price
+      let targetPercent = parseFloat(toolTargetPercent) || 0;
+      let targetAmount = parseFloat(toolTargetAmount) || 0;
+
+      if (toolTargetMode === 'percent') {
+        if (!targetPercent) return null;
+        P = B * (1 + (targetPercent / 100));
+      } else {
+        if (!targetAmount) return null;
+        // Reverse calculation for Target Amount
+        // Net Profit = (Gross Profit - Fees) * (1 - Tax Rate)
+        // N / (1 - T) = P * S * (1 - F) - B * S * (1 + F)
+        // P = [ N / (1 - T) + B * S * (1 + F) ] / [ S * (1 - F) ]
+        P = (targetAmount / (1 - T) + B * S * (1 + F)) / (S * (1 - F));
+      }
+
+      const grossProfit = (P - B) * S;
+      const totalFee = (P + B) * S * F;
+      const taxableProfit = grossProfit - totalFee;
+      const taxAmount = taxableProfit > 0 ? taxableProfit * T : 0;
+      const netProfit = taxableProfit - taxAmount;
+      const actualPercent = (P / B - 1) * 100;
+
+      return {
+        targetSellPrice: P,
+        netProfit,
+        netProfitKRW: netProfit * exRate,
+        grossProfit,
+        totalFee,
+        taxAmount,
+        actualPercent
+      };
+    };
+
+    const avgDownResult = calcAvgDown();
+    const targetProfitResult = calcTargetProfit();
+
+    return (
+      <div className="space-y-4">
+        {/* Average Down Calculator */}
+        <div className="border rounded-[14px] p-5 transition-colors bg-[#111827] border-[#1e2d4a]">
+          <h2 className="font-bold tracking-[1px] uppercase flex items-center gap-1.5 text-[#5a6a85] mb-4">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#34d399] inline-block"></span>
+            일반 물타기 (평단가) 계산기
+          </h2>
+          <p className="text-[#8896b0] text-sm mb-5 leading-relaxed">
+            추가 매수 시 변경되는 평균 단가와 총 투자 금액을 미리 계산해 봅니다.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="field">
+              <label className="block font-medium mb-1 text-xs text-[#8896b0]">현재 평단가 ($)</label>
+              <input 
+                type="number" 
+                value={toolAvgCurrentPrice}
+                onChange={e => setToolAvgCurrentPrice(e.target.value)}
+                placeholder="예: 50" 
+                className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-3 py-2.5 text-[15px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+              />
+            </div>
+            <div className="field">
+              <label className="block font-medium mb-1 text-xs text-[#8896b0]">현재 보유량 (주)</label>
+              <input 
+                type="number" 
+                value={toolAvgCurrentShares}
+                onChange={e => setToolAvgCurrentShares(e.target.value)}
+                placeholder="예: 100" 
+                className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-3 py-2.5 text-[15px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+              />
+            </div>
+            <div className="field">
+              <label className="block font-medium mb-1 text-xs text-[#8896b0]">추가 매수가 ($)</label>
+              <input 
+                type="number" 
+                value={toolAvgAddPrice}
+                onChange={e => setToolAvgAddPrice(e.target.value)}
+                placeholder="예: 40" 
+                className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-3 py-2.5 text-[15px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+              />
+            </div>
+            <div className="field">
+              <label className="block font-medium mb-1 text-xs text-[#8896b0]">추가 매수량 (주)</label>
+              <input 
+                type="number" 
+                value={toolAvgAddShares}
+                onChange={e => setToolAvgAddShares(e.target.value)}
+                placeholder="예: 50" 
+                className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-3 py-2.5 text-[15px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+              />
+            </div>
+          </div>
+
+          {avgDownResult && (
+            <div className="p-4 rounded-xl border bg-[rgba(52,211,153,0.05)] border-[rgba(52,211,153,0.1)]">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[#8896b0] text-sm">예상 평균 단가</span>
+                <span className="text-xl font-black text-[#34d399] font-mono">${avgDownResult.newAvgPrice.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm mb-1">
+                <span className="text-[#5a6a85]">총 보유 수량</span>
+                <span className="font-mono text-[#e8edf5]">{avgDownResult.totalShares.toLocaleString()}주</span>
+              </div>
+              <div className="flex justify-between items-center text-sm mb-1">
+                <span className="text-[#5a6a85]">추가 필요 금액</span>
+                <span className="font-mono text-[#e8edf5]">${avgDownResult.addAmount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-[#5a6a85]">총 투자 금액</span>
+                <span className="font-mono text-[#e8edf5]">${avgDownResult.totalInvested.toLocaleString()}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Target Profit Calculator */}
+        <div className="border rounded-[14px] p-5 transition-colors bg-[#111827] border-[#1e2d4a]">
+          <h2 className="font-bold tracking-[1px] uppercase flex items-center gap-1.5 text-[#5a6a85] mb-4">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#a855f7] inline-block"></span>
+            목표 수익 매도 계산기
+          </h2>
+          <p className="text-[#8896b0] text-sm mb-5 leading-relaxed">
+            원하는 목표 수익을 달성하기 위해 얼마에 매도해야 하는지 계산합니다. (수수료 및 세금 반영)
+          </p>
+
+          <div className="flex bg-[#1a2236] p-1 rounded-lg mb-4 border border-[#1e2d4a]">
+            <button
+              onClick={() => setToolTargetMode('percent')}
+              className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-colors ${toolTargetMode === 'percent' ? 'bg-[#3b82f6] text-white' : 'text-[#8896b0] hover:text-[#e8edf5]'}`}
+            >
+              수익률(%)로 계산
+            </button>
+            <button
+              onClick={() => setToolTargetMode('amount')}
+              className={`flex-1 py-1.5 text-sm font-bold rounded-md transition-colors ${toolTargetMode === 'amount' ? 'bg-[#3b82f6] text-white' : 'text-[#8896b0] hover:text-[#e8edf5]'}`}
+            >
+              수익금($)으로 계산
+            </button>
+          </div>
+
+          <div className="space-y-3 mb-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="field">
+                <label className="block font-medium mb-1 text-xs text-[#8896b0]">현재 평단가 ($)</label>
+                <input 
+                  type="number" 
+                  value={toolTargetAvgPrice}
+                  onChange={e => setToolTargetAvgPrice(e.target.value)}
+                  placeholder="예: 50" 
+                  className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-3 py-2.5 text-[15px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+                />
+              </div>
+              <div className="field">
+                <label className="block font-medium mb-1 text-xs text-[#8896b0]">보유 수량 (주)</label>
+                <input 
+                  type="number" 
+                  value={toolTargetShares}
+                  onChange={e => setToolTargetShares(e.target.value)}
+                  placeholder="예: 100" 
+                  className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-3 py-2.5 text-[15px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+                />
+              </div>
+            </div>
+
+            {toolTargetMode === 'percent' ? (
+              <div className="field">
+                <label className="block font-medium mb-1 text-xs text-[#8896b0]">목표 수익률 (%)</label>
+                <input 
+                  type="number" 
+                  value={toolTargetPercent}
+                  onChange={e => setToolTargetPercent(e.target.value)}
+                  placeholder="예: 10" 
+                  className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-3 py-2.5 text-[15px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+                />
+              </div>
+            ) : (
+              <div className="field">
+                <label className="block font-medium mb-1 text-xs text-[#8896b0]">목표 순수익금 ($)</label>
+                <input 
+                  type="number" 
+                  value={toolTargetAmount}
+                  onChange={e => setToolTargetAmount(e.target.value)}
+                  placeholder="예: 500" 
+                  className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-3 py-2.5 text-[15px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal"
+                />
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-[#1e2d4a]">
+              <div className="field">
+                <label className="block font-medium mb-1 text-[10px] text-[#5a6a85]">매매 수수료 (%)</label>
+                <input 
+                  type="number" 
+                  value={toolTargetFee}
+                  onChange={e => setToolTargetFee(e.target.value)}
+                  className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-2 py-1.5 text-[13px] font-mono text-[#e8edf5] outline-none transition-all"
+                />
+              </div>
+              <div className="field">
+                <label className="block font-medium mb-1 text-[10px] text-[#5a6a85]">양도소득세 (%)</label>
+                <input 
+                  type="number" 
+                  value={toolTargetTax}
+                  onChange={e => setToolTargetTax(e.target.value)}
+                  className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-2 py-1.5 text-[13px] font-mono text-[#e8edf5] outline-none transition-all"
+                />
+              </div>
+              <div className="field">
+                <label className="block font-medium mb-1 text-[10px] text-[#5a6a85]">적용 환율 (원)</label>
+                <input 
+                  type="number" 
+                  value={toolExchangeRate}
+                  onChange={e => setToolExchangeRate(e.target.value)}
+                  className="w-full bg-[#1a2236] border border-[#1e2d4a] focus:border-[#3b82f6] rounded-[8px] px-2 py-1.5 text-[13px] font-mono text-[#e8edf5] outline-none transition-all"
+                />
+              </div>
+            </div>
+          </div>
+
+          {targetProfitResult && (
+            <div className="p-4 rounded-xl border bg-[rgba(168,85,247,0.05)] border-[rgba(168,85,247,0.1)]">
+              <div className="flex justify-between items-center mb-3 pb-3 border-b border-[rgba(168,85,247,0.1)]">
+                <span className="text-[#8896b0] text-sm font-bold">목표 매도 단가</span>
+                <div className="text-right">
+                  <span className="text-2xl font-black text-[#a855f7] font-mono">${targetProfitResult.targetSellPrice.toFixed(2)}</span>
+                  <div className="text-xs text-[#a855f7] opacity-80">수익률: {targetProfitResult.actualPercent.toFixed(2)}%</div>
+                </div>
+              </div>
+              
+              <div className="space-y-1.5 mb-3">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-[#5a6a85]">총 매도 금액</span>
+                  <span className="font-mono text-[#8896b0]">${(targetProfitResult.targetSellPrice * (parseFloat(toolTargetShares) || 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-[#5a6a85]">총 매매 수수료</span>
+                  <span className="font-mono text-[#f87171]">-${targetProfitResult.totalFee.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-[#5a6a85]">예상 양도소득세</span>
+                  <span className="font-mono text-[#f87171]">-${targetProfitResult.taxAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center pt-3 border-t border-[rgba(168,85,247,0.1)]">
+                <span className="text-[#e8edf5] text-sm font-bold">최종 순수익금</span>
+                <div className="text-right">
+                  <div className="font-bold font-mono text-[#34d399]">${targetProfitResult.netProfit.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+                  <div className="text-xs text-[#34d399] opacity-80">약 {targetProfitResult.netProfitKRW.toLocaleString(undefined, { maximumFractionDigits: 0 })}원</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const saveData = () => {
     if (!seed && !round && !avgPrice && !marketPrice) {
       showToast('⚠ 저장할 데이터를 입력해주세요');
@@ -1009,10 +1312,17 @@ export default function App() {
         >
           영혼법
         </button>
+        <button 
+          onClick={() => handleTabChange('tools')}
+          className={`flex-1 py-2 rounded-[8px] font-bold text-[14px] transition-all ${activeTab === 'tools' ? 'bg-[#3b82f6] text-white shadow-md' : 'text-[#8896b0] hover:text-[#e8edf5]'}`}
+        >
+          편의기능
+        </button>
       </div>
 
       {activeTab === 'dashboard' && renderDashboard()}
       {activeTab === 'soul' && renderSoulCalculator()}
+      {activeTab === 'tools' && renderTools()}
 
       {activeTab === 'calculator' && (
         <>

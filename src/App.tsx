@@ -396,12 +396,12 @@ export default function App() {
     let valid = true;
     const newErrors: { [key: string]: boolean } = {};
 
-    const s = parseFloat(seed);
+    const s = parseFloat(seed) || 0;
     const r = parseInt(round);
     const a = parseFloat(avgPrice);
     const m = parseFloat(marketPrice);
 
-    if (!s || s <= 0) {
+    if (s < 0) {
       newErrors.seed = true;
       valid = false;
     }
@@ -419,7 +419,7 @@ export default function App() {
     }
 
     setErrors(newErrors);
-    if (!valid) showToast('⚠ 입력값을 확인해주세요');
+    if (!valid) showToast('⚠ 입력값을 확인해주세요 (시드는 비워두면 1주씩 매수 모드로 동작합니다)');
     
     return valid ? { s, r, a, m } : null;
   };
@@ -430,23 +430,37 @@ export default function App() {
 
     const { s: seedVal, r: roundVal, a: avgVal, m: marketVal } = v;
 
-    const dailyBudget = seedVal / 40;
-    const halfBudget = dailyBudget / 2;
-
     const sellPrice = avgVal * 1.1;
-
-    const locAvgShares = Math.floor(halfBudget / avgVal);
-
     const locHighPrice = marketVal * 1.15;
-    const locHighShares = Math.floor(halfBudget / locHighPrice);
 
-    const usedBudget = dailyBudget * roundVal;
-    const remaining = Math.max(0, seedVal - usedBudget);
+    let dailyBudget = 0;
+    let locAvgShares = 0;
+    let locHighShares = 0;
+    let usedBudget = 0;
+    let remaining = 0;
+    let isSeedSufficient = true;
+
+    if (seedVal > 0) {
+      dailyBudget = seedVal / 40;
+      const halfBudget = dailyBudget / 2;
+      locAvgShares = Math.floor(halfBudget / avgVal);
+      locHighShares = Math.floor(halfBudget / locHighPrice);
+
+      usedBudget = dailyBudget * roundVal;
+      remaining = Math.max(0, seedVal - usedBudget);
+      const minSharesPossible = Math.floor(dailyBudget / marketVal);
+      isSeedSufficient = minSharesPossible >= 2;
+    } else {
+      locAvgShares = 1;
+      locHighShares = 1;
+      
+      dailyBudget = avgVal + locHighPrice;
+      usedBudget = dailyBudget * roundVal;
+      remaining = 0;
+      isSeedSufficient = true; 
+    }
+
     const pct = Math.round((roundVal / 40) * 100);
-    
-    const minSharesPossible = Math.floor(dailyBudget / marketVal);
-    const isSeedSufficient = minSharesPossible >= 2;
-
     const expectedProfitUSD = usedBudget * 0.1;
     const expectedProfitKRW = expectedProfitUSD * 1500;
 
@@ -476,6 +490,7 @@ export default function App() {
       isSeedSufficient,
       expectedProfitUSD,
       expectedProfitKRW,
+      isOneShareMode: seedVal <= 0,
       simulations: {
         caseAAvg,
         caseBAvg
@@ -544,9 +559,19 @@ export default function App() {
       const data = currentTickerData[t] || {};
       const s = parseFloat(data.seed) || 0;
       const r = parseInt(data.round) || 0;
-      const invested = (s / 40) * r;
+      const a = parseFloat(data.avgPrice) || 0;
+      const m = parseFloat(data.marketPrice) || 0;
+
+      let invested = 0;
+      if (s > 0) {
+        invested = (s / 40) * r;
+        totalSeed += s;
+      } else {
+        // Fallback: 1 share mode (Assuming ~ current + upper limit price)
+        invested = r > 0 ? (a + m * 1.15) * r : 0;
+        totalSeed += invested; // We don't have a total seed, so pretend total seed is at least what we invested so far
+      }
       
-      totalSeed += s;
       totalInvested += invested;
 
       if (invested > 0) {
@@ -570,7 +595,7 @@ export default function App() {
         
         <div className="grid grid-cols-2 gap-3 mb-6">
           <div className="bg-[#1a2236] border border-[#1e2d4a] rounded-xl p-4">
-            <div className="text-[#8896b0] text-sm mb-1">총 시드</div>
+            <div className="text-[#8896b0] text-sm mb-1">{totalSeed === totalInvested && totalSeed > 0 ? '추정 최소 시드' : '총 시드'}</div>
             <div className="font-mono font-bold text-xl text-[#e8edf5]">${totalSeed.toLocaleString(undefined, {maximumFractionDigits:2})}</div>
           </div>
           <div className="bg-[#1a2236] border border-[#1e2d4a] rounded-xl p-4">
@@ -579,7 +604,7 @@ export default function App() {
           </div>
         </div>
 
-        {totalSeed > 0 ? (
+        {totalInvested > 0 ? (
           <div className="h-[250px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -1410,9 +1435,9 @@ export default function App() {
               value={seed}
               onChange={e => setSeed(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="10,000" 
+              placeholder="10,000 (빈칸 시 상/하단 1주씩 매수 모드)" 
               inputMode="numeric"
-              className={`w-full bg-[#1a2236] border ${errors.seed ? 'border-[#f87171] shadow-[0_0_0_3px_rgba(248,113,113,0.15)]' : 'border-[#1e2d4a] focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)]'} rounded-[10px] px-3.5 py-3 text-[16px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal`}
+              className={`w-full bg-[#1a2236] border ${errors.seed ? 'border-[#f87171] shadow-[0_0_0_3px_rgba(248,113,113,0.15)]' : 'border-[#1e2d4a] focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.15)]'} rounded-[10px] px-3.5 py-3 text-[16px] font-mono font-semibold text-[#e8edf5] outline-none transition-all placeholder:text-[#5a6a85] placeholder:font-normal placeholder:text-sm`}
             />
           </div>
           
@@ -1609,13 +1634,15 @@ export default function App() {
 
               {/* Summary */}
               <div className="flex justify-between items-center border rounded-[10px] px-4 py-3 mt-1 bg-[#1a2236] border-[#1e2d4a]">
-                <span className="text-[#5a6a85]">금일 매수 배정 예산</span>
+                <span className="text-[#5a6a85]">{results.isOneShareMode ? '금일 예상 소요 금액' : '금일 매수 배정 예산'}</span>
                 <span className="font-mono font-bold text-[#22d3ee]">${results.dailyBudget.toFixed(2)}</span>
               </div>
-              <div className="flex justify-between items-center border rounded-[10px] px-4 py-3 mt-2 bg-[#1a2236] border-[#1e2d4a]">
-                <span className="text-[#5a6a85]">잔여 투자 예산</span>
-                <span className="font-mono font-bold text-[#22d3ee]">${results.remaining.toFixed(2)}</span>
-              </div>
+              {!results.isOneShareMode && (
+                <div className="flex justify-between items-center border rounded-[10px] px-4 py-3 mt-2 bg-[#1a2236] border-[#1e2d4a]">
+                  <span className="text-[#5a6a85]">잔여 투자 예산</span>
+                  <span className="font-mono font-bold text-[#22d3ee]">${results.remaining.toFixed(2)}</span>
+                </div>
+              )}
 
               {/* Progress */}
               <div className="mt-3.5 mb-4">
